@@ -18,6 +18,7 @@ import {
   PutObjectCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { DeleteFilesSchemaType } from '../validators/files.validator';
 
 export const uploadFilesService = async (
   userId: string,
@@ -53,7 +54,7 @@ export const uploadFilesService = async (
           mimeType: createdFile.mimeType,
         };
       } catch (error) {
-        logger.error('AWS3 Failed to upload file', error);
+        logger.warn('Failed to upload files', files);
         if (_storageKey) {
           // delete from s3 bucket
         }
@@ -69,10 +70,10 @@ export const uploadFilesService = async (
     .map((r) => r.reason.message);
 
   if (failedRes.length > 0) {
-    logger.error('Failed to upload file(s)', files);
-    throw new InternalServerException(
-      `Failed to upload ${failedRes.length} out of ${files.length} files`,
-    );
+    logger.warn('Failed to upload file(s)', files);
+    // throw new InternalServerException(
+    //   `Failed to upload ${failedRes.length} out of ${files.length} files`,
+    // );
   }
 
   return {
@@ -149,6 +150,47 @@ export const getFileUrlService = async (fileId: string) => {
 
   return { url };
 };
+
+export const deleteFilesService = async (userId: string, fileIds: string[]) => {
+  const files = await FileModel.find({
+    _id: { $in: fileIds } 
+  })
+  if (!files.length) throw new NotFoundException('No fiiles found');
+
+  const s3Errors: string[] = [];
+
+  await Promise.all(
+    files.map(async (file) => {
+      try {
+        await deleteFromS3(file.storageKey);
+      } catch (error) {
+        logger.error(`Failed to delete ${file.storageKey} from S3`, error);
+        s3Errors.push(file.storageKey);
+      }
+    })
+  )
+
+  const successfulFileIds = files
+    .filter((file) => !s3Errors.includes(file.storageKey))
+    .map((file) => file._id);
+
+  const { deletedCount } = await FileModel.deleteMany({
+    _id: { $in: successfulFileIds },
+    userId,
+  });
+
+  if (s3Errors.length > 0) {
+    logger.warn(`Failed to delete ${s3Errors.length} files from S3`);
+    throw new InternalServerException(
+      `Failed to delete ${s3Errors.length} files from S3`,
+    );
+  }
+
+  return {
+    deletedCount,
+    failedCount: s3Errors.length,
+  }
+}
 
 async function uploadToS3(
   file: Express.Multer.File,

@@ -3,11 +3,12 @@ import { asyncHandler } from '../middlewares/asyncHander.middleware';
 import { UploadSourceEnum } from '../models/file.model';
 import { HTTPSTATUS } from '../config/http.config';
 import {
+  deleteFilesService,
   getAllFilesService,
   getFileUrlService,
   uploadFilesService,
 } from '../service/files.service';
-import { fileIdSchema } from '../validators/files.validator';
+import { deleteFilesSchema, fileIdSchema } from '../validators/files.validator';
 
 export const uploadFilesViaWebController = asyncHandler(
   async (req: Request, res: Response) => {
@@ -36,6 +37,20 @@ export const getAllFilesController = asyncHandler(
 
     return res.status(HTTPSTATUS.OK).json({
       message: 'All files retrieved successfully',
+      ...result,
+    });
+  },
+);
+
+export const deleteFilesController = asyncHandler(
+  async (req: Request, res: Response) => {
+    const userId = req.user?._id;
+    const {fileIds} = deleteFilesSchema.parse(req.body);
+
+    const result = await deleteFilesService(userId, fileIds);
+
+    return res.status(HTTPSTATUS.OK).json({
+      message: 'Files deleted successfully',
       ...result,
     });
   },
