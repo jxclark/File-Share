@@ -2,12 +2,22 @@ import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import FileModel, { UploadSourceEnum } from '../models/file.model';
 import UserModel from '../models/user.models';
-import { BadRequestException, UnauthorizedException } from '../utils/app-error';
+import {
+  BadRequestException,
+  InternalServerException,
+  NotFoundException,
+  UnauthorizedException,
+} from '../utils/app-error';
 import { sanitizeFilename } from '../utils/helper';
 import { logger } from '../utils/logger';
 import { Env } from '../config/env.config';
 import { s3 } from '../config/aws-s3.config';
-import { DeleteObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
+import {
+  DeleteObjectCommand,
+  GetObjectCommand,
+  PutObjectCommand,
+} from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 export const uploadFilesService = async (
   userId: string,
@@ -18,7 +28,7 @@ export const uploadFilesService = async (
   if (!user) throw new UnauthorizedException('Unauthorized access');
   if (!files?.length) throw new BadRequestException('No files provided');
 
-  const results = await Promise.all(
+  const results = await Promise.allSettled(
     files.map(async (file) => {
       let _storageKey: string | null = null;
       try {
@@ -50,7 +60,94 @@ export const uploadFilesService = async (
       }
     }),
   );
-  return results;
+  const successfulRes = results
+    .filter((r) => r.status === 'fulfilled')
+    .map((r) => r.value);
+
+  const failedRes = results
+    .filter((r) => r.status === 'rejected')
+    .map((r) => r.reason.message);
+
+  if (failedRes.length > 0) {
+    logger.error('Failed to upload file(s)', files);
+    throw new InternalServerException(
+      `Failed to upload ${failedRes.length} out of ${files.length} files`,
+    );
+  }
+
+  return {
+    message: `Uploaded successfully ${successfulRes.length} out of ${files.length}`,
+    data: successfulRes,
+  };
+};
+
+export const getAllFilesService = async (
+  userId: string,
+  filter: { keyword?: string },
+  pagination: { pageSize: number; pageNumber: number },
+) => {
+  const { keyword } = filter;
+
+  const filterConditions: Record<string, any> = {
+    userId,
+  };
+
+  if (keyword) {
+    filterConditions.$or = [
+      { originalName: { $regex: keyword, $options: 'i' } },
+    ];
+  }
+  const { pageSize, pageNumber } = pagination;
+  const skip = (pageNumber - 1) * pageSize;
+
+  const [files, totalCount] = await Promise.all([
+    FileModel.find(filterConditions)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(pageSize),
+    FileModel.countDocuments(filterConditions),
+  ]);
+
+  const filesWithUrls = await Promise.all(
+    files.map(async (file) => {
+      const url = await getFileFromS3({
+        storageKey: file.storageKey,
+        mimeType: file.mimeType,
+        expiresIn: 3600, // 1 hour
+      });
+      return {
+        ...file.toObject(),
+        url,
+        storageKey: undefined, // Exclude storageKey from response
+      };
+    }),
+  );
+
+  const totalPages = Math.ceil(totalCount / pageSize);
+
+  return {
+    file: filesWithUrls,
+    pagination: {
+      pageSize,
+      pageNumber,
+      totalCount,
+      totalPages,
+      skip,
+    },
+  };
+};
+
+export const getFileUrlService = async (fileId: string) => {
+  const file = await FileModel.findOne({ _id: fileId });
+  if (!file) throw new NotFoundException('File not found');
+
+  const url = await getFileFromS3({
+    storageKey: file.storageKey,
+    expiresIn: 3600, // 1 hour
+    mimeType: file.mimeType,
+  });
+
+  return { url };
 };
 
 async function uploadToS3(
@@ -84,6 +181,36 @@ async function uploadToS3(
     };
   } catch (error) {
     logger.error('AWS Failed to upload file', error);
+    throw error;
+  }
+}
+
+async function getFileFromS3({
+  storageKey,
+  expiresIn = 60,
+  filename,
+  mimeType,
+}: {
+  storageKey: string;
+  expiresIn?: number;
+  filename?: string;
+  mimeType?: string;
+}) {
+  try {
+    const command = new GetObjectCommand({
+      Bucket: Env.AWS_S3_BUCKET,
+      Key: storageKey,
+      ...(!filename && {
+        ResponseContentType: mimeType,
+        ResponseContentDisposition: `inline`,
+      }),
+      ...(filename && {
+        ResponseContentDisposition: `attachment; filename="${filename}"`,
+      }),
+    });
+    return await getSignedUrl(s3, command, { expiresIn });
+  } catch (error) {
+    logger.error('Failed to get file from S3', storageKey);
     throw error;
   }
 }
