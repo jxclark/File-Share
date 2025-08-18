@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import "./config/passport.config"
 import express, { Request, Response } from 'express';
 import helmet from 'helmet';
 import { Env } from './config/env.config';
@@ -10,6 +11,7 @@ import { errorHandler } from './middlewares/errorHandler.middleware';
 import { logger } from './utils/logger';
 import { connectDatabase, disconnectDatabase } from './config/database.config';
 import internalRoutes from './routes/internal';
+import passport from 'passport';
 
 const app = express();
 const BASE_PATH = Env.BASE_PATH;
@@ -33,6 +35,8 @@ app.use(express.urlencoded({ extended: true }));
 
 app.use(helmet());
 
+app.use(passport.initialize());
+
 app.get(
   '/',
   asyncHandler(async (req: Request, res: Response) => {
@@ -55,10 +59,10 @@ async function startServer() {
 
     shutdownSignals.forEach((signal) => {
       process.on(signal, async () => {
-        logger.info(`${signal} received: Shutting down gracefully`);
+        logger.warn(`${signal} received: Shutting down gracefully`);
         try {
           server.close(() => {
-            logger.info('HTTP server closed');
+            logger.warn('HTTP server closed');
           });
 
           //disconnect from database

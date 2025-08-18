@@ -32,7 +32,7 @@ const FileSchema = new Schema<FileDocument, FileModelType>(
     mimeType: { type: String, required: true },
     size: { type: Number, required: true, min: 1 },
     ext: { type: String, required: true },
-    url: { type: String, required: true },
+    url: { type: String, required: false },
     uploadVia: {
       type: String,
       enum: Object.keys(UploadSourceEnum),
