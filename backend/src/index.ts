@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import "./config/passport.config"
+import './config/passport.config';
 import express, { Request, Response } from 'express';
 import helmet from 'helmet';
 import { Env } from './config/env.config';
@@ -12,9 +12,9 @@ import { logger } from './utils/logger';
 import { connectDatabase, disconnectDatabase } from './config/database.config';
 import internalRoutes from './routes/internal';
 import passport from 'passport';
+import publicRoutes from './routes/public';
 
 const app = express();
-const BASE_PATH = Env.BASE_PATH;
 
 const allowedOrigins = Env.ALLOWED_ORIGINS;
 
@@ -44,7 +44,9 @@ app.get(
   }),
 );
 
-app.use(`${BASE_PATH}`, internalRoutes);
+app.use(`${Env.BASE_PATH}`, internalRoutes);
+
+app.use(publicRoutes);
 
 app.use(errorHandler);
 
