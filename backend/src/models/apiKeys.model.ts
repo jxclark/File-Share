@@ -3,7 +3,7 @@ import mongoose, { Document, Model, Schema, Types } from 'mongoose';
 export interface ApiKeyDocument extends Document {
   userId: Types.ObjectId;
   name: string;
-  displayName: string;
+  displayKey: string;
   hashedKey: string;
   createdAt: Date;
   updatedAt: Date;
@@ -18,7 +18,7 @@ const ApiKeySchema = new Schema<ApiKeyDocument, ApiKeyModelType>(
   {
     userId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     name: { type: String, required: true },
-    displayName: { type: String, required: true },
+    displayKey: { type: String, required: true },
     hashedKey: { type: String, required: true, unique: true, select: false },
     lastUsedAt: { type: Date, default: null },
   },
