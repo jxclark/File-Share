@@ -11,6 +11,7 @@ import {
 import { sanitizeFilename } from '../utils/helper';
 import { logger } from '../utils/logger';
 import { Env } from '../config/env.config';
+import { Upload } from '@aws-sdk/lib-storage';
 import { s3 } from '../config/aws-s3.config';
 import {
   DeleteObjectCommand,
@@ -18,7 +19,8 @@ import {
   PutObjectCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { DeleteFilesSchemaType } from '../validators/files.validator';
+import archiver from 'archiver';
+import { PassThrough, Readable } from 'stream';
 
 export const uploadFilesService = async (
   userId: string,
@@ -153,8 +155,8 @@ export const getFileUrlService = async (fileId: string) => {
 
 export const deleteFilesService = async (userId: string, fileIds: string[]) => {
   const files = await FileModel.find({
-    _id: { $in: fileIds } 
-  })
+    _id: { $in: fileIds },
+  });
   if (!files.length) throw new NotFoundException('No fiiles found');
 
   const s3Errors: string[] = [];
@@ -167,8 +169,8 @@ export const deleteFilesService = async (userId: string, fileIds: string[]) => {
         logger.error(`Failed to delete ${file.storageKey} from S3`, error);
         s3Errors.push(file.storageKey);
       }
-    })
-  )
+    }),
+  );
 
   const successfulFileIds = files
     .filter((file) => !s3Errors.includes(file.storageKey))
@@ -189,7 +191,87 @@ export const deleteFilesService = async (userId: string, fileIds: string[]) => {
   return {
     deletedCount,
     failedCount: s3Errors.length,
+  };
+};
+
+export const downloadFilesService = async (
+  userId: string,
+  fileIds: string[],
+) => {
+  const files = await FileModel.find({
+    _id: { $in: fileIds },
+  });
+  if (!files.length) throw new NotFoundException('No fiiles found');
+
+  if (files.length === 1) {
+    const signedUrl = await getFileFromS3({
+      storageKey: files[0].storageKey,
+      filename: files[0].originalName,
+    });
+
+    return {
+      url: signedUrl,
+      isZip: false,
+    };
   }
+  const url = await handleMultipleFilesDownload(files, userId);
+
+  return {
+    url,
+    isZip: true,
+  };
+};
+
+async function handleMultipleFilesDownload(
+  files: Array<{ storageKey: string; originalName: string }>,
+  userId: string,
+) {
+  const timestamp = Date.now();
+
+  const zipKey = `temp-zips/${userId}/${timestamp}.zip`;
+
+  const zipFilename = `upload-${timestamp}.zip`;
+
+  const zip = archiver('zip', { zlib: { level: 6 } });
+
+  const passThrough = new PassThrough();
+
+  zip.on('error', (err) => {
+    passThrough.destroy(err);
+  });
+
+  const upload = new Upload({
+    client: s3,
+    params: {
+      Bucket: Env.AWS_S3_BUCKET,
+      Key: zipKey,
+      Body: passThrough,
+      ContentType: 'application/zip',
+    },
+  });
+
+  zip.pipe(passThrough);
+
+  for (const file of files) {
+    try {
+      const stream = await getS3ReadStream(file.storageKey);
+      zip.append(stream, { name: sanitizeFilename(file.originalName) });
+    } catch (error: any) {
+      zip.destroy(error);
+      throw error;
+    }
+  }
+  await zip.finalize();
+
+  await upload.done();
+
+  const url = await getFileFromS3({
+    storageKey: zipKey,
+    filename: zipFilename,
+    expiresIn: 3600, // 1 hour
+  });
+
+  return url;
 }
 
 async function uploadToS3(
@@ -254,6 +336,26 @@ async function getFileFromS3({
   } catch (error) {
     logger.error('Failed to get file from S3', storageKey);
     throw error;
+  }
+}
+
+async function getS3ReadStream(storageKey: string) {
+  try {
+    const command = new GetObjectCommand({
+      Bucket: Env.AWS_S3_BUCKET,
+      Key: storageKey,
+    });
+    const response = await s3.send(command);
+
+    if (!response.Body) {
+      logger.error(`No body returned for key: ${storageKey}`);
+      throw new InternalServerException('No body returned for key');
+    }
+
+    return response.Body as Readable;
+  } catch (error) {
+    logger.error(`Error getting s3 stream for key: ${storageKey}`);
+    throw new InternalServerException(`Failed to retrieve file: ${error}`);
   }
 }
 
