@@ -4,11 +4,16 @@ import { UploadSourceEnum } from '../models/file.model';
 import { HTTPSTATUS } from '../config/http.config';
 import {
   deleteFilesService,
+  downloadFilesService,
   getAllFilesService,
   getFileUrlService,
   uploadFilesService,
 } from '../service/files.service';
-import { deleteFilesSchema, fileIdSchema } from '../validators/files.validator';
+import {
+  deleteFilesSchema,
+  downloadFilesSchema,
+  fileIdSchema,
+} from '../validators/files.validator';
 
 export const uploadFilesViaWebController = asyncHandler(
   async (req: Request, res: Response) => {
@@ -45,13 +50,28 @@ export const getAllFilesController = asyncHandler(
 export const deleteFilesController = asyncHandler(
   async (req: Request, res: Response) => {
     const userId = req.user?._id;
-    const {fileIds} = deleteFilesSchema.parse(req.body);
+    const { fileIds } = deleteFilesSchema.parse(req.body);
 
     const result = await deleteFilesService(userId, fileIds);
 
     return res.status(HTTPSTATUS.OK).json({
       message: 'Files deleted successfully',
       ...result,
+    });
+  },
+);
+
+export const downloadFilesController = asyncHandler(
+  async (req: Request, res: Response) => {
+    const userId = req.user?._id;
+    const { fileIds } = downloadFilesSchema.parse(req.body);
+
+    const result = await downloadFilesService(userId, fileIds);
+
+    return res.status(HTTPSTATUS.OK).json({
+      message: 'File download URL generated successfully',
+      downloadUrl: result?.url,
+      isZip: result?.isZip || false,
     });
   },
 );
