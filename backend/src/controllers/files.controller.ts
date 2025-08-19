@@ -79,8 +79,18 @@ export const downloadFilesController = asyncHandler(
 export const publicGetFileUrlController = asyncHandler(
   async (req: Request, res: Response) => {
     const fileId = fileIdSchema.parse(req.params.fileId);
-    const { url } = await getFileUrlService(fileId);
+    const { url, stream, contentType, filesize } =
+      await getFileUrlService(fileId);
 
-    return res.redirect(url);
+    // return res.redirect(url);
+    res.set({
+      'Content-Type': contentType,
+      'Content-Length': filesize,
+      'Cache-Control': 'public, max-age=3600',
+      'Content-Disposition': 'inline',
+      'X-Content-Type-Options': 'nosniff',
+    });
+
+    stream.pipe(res);
   },
 );
