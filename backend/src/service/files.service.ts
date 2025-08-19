@@ -144,13 +144,20 @@ export const getFileUrlService = async (fileId: string) => {
   const file = await FileModel.findOne({ _id: fileId });
   if (!file) throw new NotFoundException('File not found');
 
+  const stream = await getS3ReadStream(file.storageKey);
+
   const url = await getFileFromS3({
     storageKey: file.storageKey,
     expiresIn: 3600, // 1 hour
     mimeType: file.mimeType,
   });
 
-  return { url };
+  return {
+    url: '',
+    stream,
+    contentType: file.mimeType,
+    filesize: file.size,
+  };
 };
 
 export const deleteFilesService = async (userId: string, fileIds: string[]) => {
