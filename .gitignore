@@ -44,6 +44,7 @@ build/Release
 
 # Dependency directories
 backend/node_modules/
+client/node_modules/
 node_modules/
 jspm_packages/
 
@@ -83,6 +84,8 @@ web_modules/
 .env.test.local
 .env.production.local
 .env.local
+
+client/.env
 
 # parcel-bundler cache (https://parceljs.org/)
 .cache
